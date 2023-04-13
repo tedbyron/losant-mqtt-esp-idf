@@ -1,8 +1,8 @@
 #![warn(clippy::all, clippy::cargo, clippy::nursery, rust_2018_idioms)]
 #![forbid(unsafe_code)]
-#![feature(lazy_cell)]
 #![doc = include_str!("../README.md")]
 
+use dotenvy_macro::dotenv;
 use embedded_svc::mqtt::client::{Event, MessageId, QoS};
 use esp_idf_svc::mqtt::client::{EspMqttClient, EspMqttMessage, MqttClientConfiguration};
 use esp_idf_sys::EspError;
@@ -10,22 +10,11 @@ use esp_idf_sys::EspError;
 pub const BROKER_HOST: &str = "broker.losant.com";
 pub const BROKER_PORT: u16 = 1883;
 pub const BROKER_PORT_SECURE: u16 = 8883;
-pub const TOPIC_PREFIX: &str = "losant/";
-pub const TOPIC_STATE: &str = "/state";
-pub const TOPIC_COMMAND: &str = "/command";
-
-#[toml_cfg::toml_config]
-pub struct Config {
-    #[default("")]
-    pub username: &'static str,
-    #[default("")]
-    pub password: &'static str,
-}
+pub const TOPIC_FORMAT_STATE: &str = "losant/{}/state";
+pub const TOPIC_FORMAT_MESSAGE: &str = "losant/{}/command";
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("username and password must be set in `cfg.toml`")]
-    Config,
     #[error(transparent)]
     Esp(#[from] EspError),
 }
@@ -37,13 +26,12 @@ pub struct Device {
 }
 
 impl Device {
-    fn broker_url() -> Result<String> {
-        let Config { username, password } = CONFIG;
-        if username.is_empty() || password.is_empty() {
-            Err(Error::Config)
-        } else {
-            Ok(format!("mqtt://{username}:{password}@{BROKER_HOST}"))
-        }
+    fn broker_url() -> String {
+        format!(
+            "mqtt://{}:{}@{BROKER_HOST}",
+            dotenv!("LOSANT_USERNAME"),
+            dotenv!("LOSANT_PASSWORD")
+        )
     }
 
     pub fn new<F>(
@@ -51,7 +39,7 @@ impl Device {
     ) -> Result<Self> {
         Ok(Self {
             client: EspMqttClient::new(
-                Self::broker_url()?,
+                Self::broker_url(),
                 &MqttClientConfiguration::default(),
                 callback,
             )?,
@@ -63,7 +51,7 @@ impl Device {
         callback: impl for<'b> FnMut(&'b EventResult<'b>) + Send + 'static,
     ) -> Result<Self> {
         Ok(Self {
-            client: EspMqttClient::new(Self::broker_url()?, &config, callback)?,
+            client: EspMqttClient::new(Self::broker_url(), &config, callback)?,
         })
     }
 

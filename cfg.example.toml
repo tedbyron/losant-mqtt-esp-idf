@@ -1,6 +1,3 @@
 [losant-mqtt-rs]
-mqtt.username = ""
-mqtt.password = ""
-
-wifi.ssid = ""
-wifi.psk = ""
+username = ""
+password = ""

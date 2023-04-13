@@ -8,9 +8,16 @@ description = "MQTT Client for connecting Espressif devices to the Losant IoT Pl
 repository = "https://github.com/tedbyron/losant-mqtt-rs"
 license = "MIT OR Apache-2.0"
 
+[[example]]
+name = "esp32-c3-devkit-rust-1"
+required-features = ["esp-idf-sys/binstart"]
+
 [build-dependencies]
 anyhow = "1.0"
 embuild = "0.31"
+
+[dev-dependencies]
+anyhow = "1.0"
 
 [dependencies]
 embedded-svc = "0.24"

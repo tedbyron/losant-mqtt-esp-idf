@@ -3,20 +3,20 @@ target = "riscv32imc-esp-espidf"
 
 [target.xtensa-esp32-espidf]
 linker = "ldproxy"
-runner = "espflash flash --monitor"
+runner = "espflash --monitor"
 
 [target.xtensa-esp32s2-espidf]
 linker = "ldproxy"
-runner = "espflash flash --monitor"
+runner = "espflash --monitor"
 
 [target.xtensa-esp32s3-espidf]
 linker = "ldproxy"
-runner = "espflash flash --monitor"
+runner = "espflash --monitor"
 
 [target.riscv32imc-esp-espidf]
 linker = "ldproxy"
 rustflags = ["-C", "default-linker-libraries"]
-runner = "espflash flash --monitor"
+runner = "espflash --monitor"
 
 [unstable]
 build-std = ["std", "panic_abort"]

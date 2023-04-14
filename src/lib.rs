@@ -13,46 +13,54 @@ pub const BROKER_PORT_SECURE: u16 = 8883;
 pub const TOPIC_FORMAT_STATE: &str = "losant/{}/state";
 pub const TOPIC_FORMAT_MESSAGE: &str = "losant/{}/command";
 
+pub const MAX_PACKET_SIZE: u16 = 256;
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
-    Esp(#[from] EspError),
+    EspError(#[from] EspError),
+    #[error(
+        "Packet size of {0} bytes exceeded maximum of {} bytes",
+        MAX_PACKET_SIZE
+    )]
+    PacketSize(usize),
 }
-pub type Result<T> = std::result::Result<T, Error>;
-pub type EventResult<'a> = std::result::Result<Event<EspMqttMessage<'a>>, EspError>;
 
-pub struct Device {
+pub struct Device<'a> {
+    id: String,
+
+    config: MqttClientConfiguration<'a>,
     client: EspMqttClient,
 }
 
-impl Device {
-    fn broker_url() -> String {
-        format!(
-            "mqtt://{}:{}@{BROKER_HOST}",
-            dotenv!("LOSANT_USERNAME"),
-            dotenv!("LOSANT_PASSWORD")
-        )
-    }
-
+impl<'a> Device<'a> {
     pub fn new<F>(
-        callback: impl for<'b> FnMut(&'b EventResult<'b>) + Send + 'static,
-    ) -> Result<Self> {
+        id: impl ToString,
+        callback: impl for<'b> FnMut(&'b Result<Event<EspMqttMessage<'b>>, EspError>) + Send + 'static,
+    ) -> Result<Self, EspError> {
+        let config = MqttClientConfiguration::default();
+
         Ok(Self {
-            client: EspMqttClient::new(
-                Self::broker_url(),
-                &MqttClientConfiguration::default(),
-                callback,
-            )?,
+            id: id.to_string(),
+            client: EspMqttClient::new(Self::broker_url(), &config, callback)?,
+            config,
         })
     }
 
-    pub fn with_config<'a>(
+    pub fn with_config(
+        id: impl ToString,
         config: MqttClientConfiguration<'a>,
-        callback: impl for<'b> FnMut(&'b EventResult<'b>) + Send + 'static,
-    ) -> Result<Self> {
+        callback: impl for<'b> FnMut(&'b Result<Event<EspMqttMessage<'b>>, EspError>) + Send + 'static,
+    ) -> Result<Self, EspError> {
         Ok(Self {
+            id: id.to_string(),
             client: EspMqttClient::new(Self::broker_url(), &config, callback)?,
+            config,
         })
+    }
+
+    pub fn id(&self) -> &str {
+        &self.id
     }
 
     pub fn enqueue(
@@ -61,10 +69,8 @@ impl Device {
         qos: QoS,
         retain: bool,
         payload: &[u8],
-    ) -> Result<MessageId> {
-        self.client
-            .enqueue(topic.as_ref(), qos, retain, payload)
-            .map_err(Into::into)
+    ) -> Result<MessageId, EspError> {
+        self.client.enqueue(topic.as_ref(), qos, retain, payload)
     }
 
     pub fn publish(
@@ -73,19 +79,23 @@ impl Device {
         qos: QoS,
         retain: bool,
         payload: &[u8],
-    ) -> Result<MessageId> {
-        self.client
-            .publish(topic.as_ref(), qos, retain, payload)
-            .map_err(Into::into)
+    ) -> Result<MessageId, EspError> {
+        self.client.publish(topic.as_ref(), qos, retain, payload)
     }
 
-    pub fn subscribe(&mut self, topic: impl AsRef<str>, qos: QoS) -> Result<MessageId> {
-        self.client
-            .subscribe(topic.as_ref(), qos)
-            .map_err(Into::into)
+    pub fn subscribe(&mut self, topic: impl AsRef<str>, qos: QoS) -> Result<MessageId, EspError> {
+        self.client.subscribe(topic.as_ref(), qos)
     }
 
-    pub fn unsubscribe(&mut self, topic: impl AsRef<str>) -> Result<MessageId> {
-        self.client.unsubscribe(topic.as_ref()).map_err(Into::into)
+    pub fn unsubscribe(&mut self, topic: impl AsRef<str>) -> Result<MessageId, EspError> {
+        self.client.unsubscribe(topic.as_ref())
+    }
+
+    fn broker_url() -> String {
+        format!(
+            "mqtt://{}:{}@{BROKER_HOST}",
+            dotenv!("LOSANT_USERNAME"),
+            dotenv!("LOSANT_PASSWORD")
+        )
     }
 }

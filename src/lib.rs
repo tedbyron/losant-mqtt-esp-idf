@@ -2,7 +2,6 @@
 #![forbid(unsafe_code)]
 #![doc = include_str!("../README.md")]
 
-use dotenvy_macro::dotenv;
 use embedded_svc::mqtt::client::{Event, MessageId, QoS};
 use esp_idf_svc::mqtt::client::{EspMqttClient, EspMqttMessage, MqttClientConfiguration};
 use esp_idf_sys::EspError;
@@ -12,13 +11,13 @@ pub const BROKER_PORT: u16 = 1883;
 pub const BROKER_PORT_SECURE: u16 = 8883;
 pub const TOPIC_FORMAT_STATE: &str = "losant/{}/state";
 pub const TOPIC_FORMAT_MESSAGE: &str = "losant/{}/command";
-
 pub const MAX_PACKET_SIZE: u16 = 256;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
     EspError(#[from] EspError),
+
     #[error(
         "Packet size of {0} bytes exceeded maximum of {} bytes",
         MAX_PACKET_SIZE
@@ -26,10 +25,18 @@ pub enum Error {
     PacketSize(usize),
 }
 
+#[toml_cfg::toml_config]
+struct Config {
+    #[default("")]
+    losant_username: &'static str,
+    #[default("")]
+    losant_password: &'static str,
+}
+
 pub struct Device<'a> {
     id: String,
 
-    config: MqttClientConfiguration<'a>,
+    _config: MqttClientConfiguration<'a>,
     client: EspMqttClient,
 }
 
@@ -43,7 +50,7 @@ impl<'a> Device<'a> {
         Ok(Self {
             id: id.to_string(),
             client: EspMqttClient::new(Self::broker_url(), &config, callback)?,
-            config,
+            _config: config,
         })
     }
 
@@ -55,7 +62,7 @@ impl<'a> Device<'a> {
         Ok(Self {
             id: id.to_string(),
             client: EspMqttClient::new(Self::broker_url(), &config, callback)?,
-            config,
+            _config: config,
         })
     }
 
@@ -94,8 +101,7 @@ impl<'a> Device<'a> {
     fn broker_url() -> String {
         format!(
             "mqtt://{}:{}@{BROKER_HOST}",
-            dotenv!("LOSANT_USERNAME"),
-            dotenv!("LOSANT_PASSWORD")
+            CONFIG.losant_username, CONFIG.losant_password
         )
     }
 }

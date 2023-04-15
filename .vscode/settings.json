@@ -1,4 +1,4 @@
 {
   "rust-analyzer.check.allTargets": false,
-  "rust-analyzer.cargo.features": "all"
+  "rust-analyzer.cargo.target": "riscv32imc-esp-espidf"
 }

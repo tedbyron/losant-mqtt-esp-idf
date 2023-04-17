@@ -77,9 +77,9 @@ fn wifi(
     }))?;
 
     wifi.start()?;
-    if !WifiWait::new(sysloop)?.wait_with_timeout(Duration::from_secs(20), || {
-        wifi.is_started().unwrap_or(true)
-    }) {
+    if !WifiWait::new(sysloop)?
+        .wait_with_timeout(Duration::from_secs(20), || wifi.is_started().unwrap_or(true))
+    {
         bail!("wifi did not start");
     }
 

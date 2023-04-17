@@ -1,9 +1,9 @@
 [package]
-name = "esp-losant-mqtt"
+name = "losant-mqtt-esp-idf"
 version = "0.1.0"
 edition = "2021"
-description = "MQTT Client for connecting ESP32 (ESP-IDF) devices to the Losant IoT Platform"
-repository = "https://github.com/tedbyron/esp-losant-mqtt"
+description = "ESP-IDF MQTT Client for connecting devices to the Losant IoT Platform"
+repository = "https://github.com/tedbyron/losant-mqtt-esp-idf"
 authors = ["Teddy Byron <ted@tedbyron.com>"]
 license = "MIT OR Apache-2.0"
 categories = ["embedded"]

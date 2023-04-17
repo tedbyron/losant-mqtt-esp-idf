@@ -1,8 +1,7 @@
-[esp-losant-mqtt]
+[losant-mqtt-esp-idf]
 losant_key = ''
 losant_secret = ''
 
 # required to run examples
-# [esp-losant-mqtt]
 # wifi_ssid = ''
 # wifi_psk = ''

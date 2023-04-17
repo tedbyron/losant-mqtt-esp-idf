@@ -1,16 +1,9 @@
-#![warn(
-    clippy::all,
-    clippy::cargo,
-    clippy::nursery,
-    clippy::pedantic,
-    rust_2018_idioms
-)]
+#![warn(clippy::all, clippy::cargo, clippy::nursery, clippy::pedantic, rust_2018_idioms)]
 #![forbid(unsafe_code)]
 #![feature(lazy_cell)]
 #![doc = include_str!("../README.md")]
 
-use std::collections::HashMap;
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 use esp_idf_sys::EspError;
 pub use serde_json::json;
@@ -39,7 +32,7 @@ pub enum Error {
     #[error(transparent)]
     Json(#[from] serde_json::Error),
 
-    #[error("a client ID must be provided")]
+    #[error("a client ID was not provided")]
     MissingId,
 
     #[error(
@@ -71,7 +64,7 @@ pub struct State<'a> {
 ///
 /// See <https://docs.losant.com/mqtt/overview/#subscribing-to-commands>
 #[derive(Debug, serde::Deserialize)]
-pub struct Command<'a, T = HashMap<&'a str, &'a str>> {
+pub struct Command<'a, P = HashMap<&'a str, &'a str>> {
     pub name: &'a str,
-    pub payload: T,
+    pub payload: P,
 }

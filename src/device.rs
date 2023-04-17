@@ -24,16 +24,11 @@ impl<'a> Device<'a> {
     #[inline]
     #[must_use]
     pub fn builder() -> Builder<'a> {
-        Builder {
-            id: None,
-            secure: true,
-            event_handler: None,
-            config: None,
-        }
+        Builder { id: None, secure: true, event_handler: None, config: None }
     }
 
-    /// Publish a message to the broker. [`QoS::AtMostOnce`] (0) or [`QoS::AtLeastOnce`] (1) must be
-    /// used.
+    /// Publish a message to the broker. [`QoS::AtMostOnce`] (0) or
+    /// [`QoS::AtLeastOnce`] (1) must be used.
     ///
     /// # Errors
     ///
@@ -48,12 +43,11 @@ impl<'a> Device<'a> {
         payload: &[u8],
     ) -> Result<MessageId> {
         Self::check_publish(qos, payload)?;
-        self.client
-            .publish(topic.as_ref(), qos, retain, payload)
-            .map_err(Error::from)
+        self.client.publish(topic.as_ref(), qos, retain, payload).map_err(Error::from)
     }
 
-    /// Enqueue a message to be sent later (non-blocking [`publish`](Device::publish)).
+    /// Enqueue a message to be sent later (non-blocking
+    /// [`publish`](Device::publish)).
     ///
     /// # Errors
     ///
@@ -68,13 +62,11 @@ impl<'a> Device<'a> {
         payload: &[u8],
     ) -> Result<MessageId> {
         Self::check_publish(qos, payload)?;
-        self.client
-            .enqueue(topic.as_ref(), qos, retain, payload)
-            .map_err(Error::from)
+        self.client.enqueue(topic.as_ref(), qos, retain, payload).map_err(Error::from)
     }
 
-    /// Publish device state to the broker. [`QoS::AtMostOnce`] (0) or [`QoS::AtLeastOnce`] (1) must
-    /// be used.
+    /// Publish device state to the broker. [`QoS::AtMostOnce`] (0) or
+    /// [`QoS::AtLeastOnce`] (1) must be used.
     ///
     /// # Errors
     ///
@@ -92,13 +84,11 @@ impl<'a> Device<'a> {
         let payload = serde_json::to_string(&state).map_err(Error::from)?;
         let payload = payload.as_bytes();
         Self::check_publish(qos, payload)?;
-        self.client
-            .publish(&self.state_topic_form, qos, retain, payload)
-            .map_err(Error::from)
+        self.client.publish(&self.state_topic_form, qos, retain, payload).map_err(Error::from)
     }
 
-    /// Publish device state to the broker. [`QoS::AtMostOnce`] (0) or [`QoS::AtLeastOnce`] (1) must
-    /// be used.
+    /// Publish device state to the broker. [`QoS::AtMostOnce`] (0) or
+    /// [`QoS::AtLeastOnce`] (1) must be used.
     ///
     /// # Errors
     ///
@@ -116,9 +106,7 @@ impl<'a> Device<'a> {
         let payload = state.to_string();
         let payload = payload.as_bytes();
         Self::check_publish(qos, payload)?;
-        self.client
-            .publish(&self.state_topic_form, qos, retain, payload)
-            .map_err(Error::from)
+        self.client.publish(&self.state_topic_form, qos, retain, payload).map_err(Error::from)
     }
 
     /// Subscribe to the `topic`. [`QoS::AtMostOnce`] (0) is used.
@@ -127,9 +115,7 @@ impl<'a> Device<'a> {
     ///
     /// - if there was an error subscribing to the topic
     pub fn subscribe(&mut self, topic: impl AsRef<str>) -> Result<MessageId> {
-        self.client
-            .subscribe(topic.as_ref(), QoS::AtMostOnce)
-            .map_err(Error::from)
+        self.client.subscribe(topic.as_ref(), QoS::AtMostOnce).map_err(Error::from)
     }
 
     /// Unsubscribe from the `topic`.
@@ -181,8 +167,8 @@ impl<'a> Builder<'a> {
         self
     }
 
-    /// If `true` or if this function is not called, TLS will be used (mqtts, port 8883). If
-    /// `false`, TCP will be used (mqtt, port 1883).
+    /// If `true` or if this function is not called, TLS will be used (mqtts,
+    /// port 8883). If `false`, TCP will be used (mqtt, port 1883).
     #[inline]
     #[must_use]
     pub const fn secure(mut self, secure: bool) -> Self {
@@ -240,11 +226,7 @@ impl<'a> Builder<'a> {
         let mut device = Device {
             state_topic_form,
             client: EspMqttClient::new(
-                if self.secure {
-                    crate::BROKER_URL_TLS
-                } else {
-                    crate::BROKER_URL_TCP
-                },
+                if self.secure { crate::BROKER_URL_TLS } else { crate::BROKER_URL_TCP },
                 &config,
                 self.event_handler.unwrap_or_else(|| Box::new(|_| ())),
             )?,

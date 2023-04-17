@@ -10,7 +10,7 @@ MQTT Client for connecting ESP32 (ESP-IDF) devices to the Losant IoT Platform
 - see the [ESP-IDF template](https://github.com/esp-rs/esp-idf-template) to get started making a
   binary crate that uses ESP-IDF
 
-- see the [`examples`](examples)
+- see the [`examples`](https://github.com/tedbyron/esp-losant-mqtt/tree/main/examples) dir
 
 - add Losant info to a `cfg.toml` file in your crate root (make sure to .gitignore!); see
   `cfg.example.toml`

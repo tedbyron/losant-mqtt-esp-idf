@@ -10,7 +10,7 @@ MQTT Client for connecting ESP32 (ESP-IDF) devices to the Losant IoT Platform
 - see the [ESP-IDF template](https://github.com/esp-rs/esp-idf-template) to get started making a
   binary crate that uses ESP-IDF
 
-- see the `examples` dir
+- see the [`examples`](examples)
 
 - add Losant info to a `cfg.toml` file in your crate root (make sure to .gitignore!); see
   `cfg.example.toml`
@@ -20,6 +20,11 @@ use esp_losant_mqtt::Device;
 
 # TODO
 ```
+
+## Message limits
+
+- refer to the [Losant docs](https://docs.losant.com/mqtt/overview/#message-limits); this library
+  does not currently rate limit, but does check message size.
 
 ## Running examples
 

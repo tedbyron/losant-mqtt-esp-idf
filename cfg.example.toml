@@ -1,8 +1,8 @@
 [esp-losant-mqtt]
-losant_username = ''
-losant_password = ''
+losant_key = ''
+losant_secret = ''
 
-# required for examples
+# required to run examples
 # [esp-losant-mqtt]
 # wifi_ssid = ''
 # wifi_psk = ''

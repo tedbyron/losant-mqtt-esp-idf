@@ -1,18 +1,23 @@
-#![warn(clippy::all, clippy::nursery, rust_2018_idioms)]
+#![warn(clippy::all, clippy::nursery, clippy::pedantic, rust_2018_idioms)]
 #![feature(iter_intersperse)]
 
-use std::{net::Ipv4Addr, time::Duration};
+use std::{net::Ipv4Addr, thread, time::Duration};
 
 use anyhow::{anyhow, bail, Result};
-use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
+use embedded_svc::{
+    mqtt::client::{Details, Event},
+    wifi::{ClientConfiguration, Configuration, Wifi},
+};
 use esp_idf_hal::{modem::Modem, peripheral::Peripheral, prelude::Peripherals};
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     log::EspLogger,
+    mqtt::client::EspMqttMessage,
     netif::{EspNetif, EspNetifWait},
     wifi::{EspWifi, WifiWait},
 };
 use esp_idf_sys::EspError;
+use esp_losant_mqtt::Device;
 
 #[toml_cfg::toml_config]
 struct Config {
@@ -29,11 +34,27 @@ fn main() -> Result<()> {
 
     let peripherals = Peripherals::take().unwrap();
     let sysloop = EspSystemEventLoop::take()?;
-
     let (_wifi, mac) = wifi(peripherals.modem, &sysloop)?;
-    println!("Using device MAC address {mac} as Losant device ID",);
+    println!("Using wifi interface MAC address {mac} as Losant device ID",);
 
-    Ok(())
+    let _device = Device::builder()
+        .id(&mac)
+        .event_handler(|event| match event {
+            Ok(Event::Received(message)) => on_message(message),
+            Ok(event) => println!("MQTT event: {event:?}"),
+            Err(e) => eprintln!("MQTT error: {e}"),
+        })
+        .build()?;
+
+    loop {
+        thread::sleep(Duration::from_secs(1));
+    }
+}
+
+fn on_message(msg: &EspMqttMessage<'_>) {
+    if *msg.details() == Details::Complete {
+        println!("MQTT message: {msg:?}");
+    }
 }
 
 fn wifi(
@@ -67,10 +88,10 @@ fn wifi(
         Duration::from_secs(20),
         || {
             wifi.is_connected().unwrap_or(false)
-                && match wifi.sta_netif().get_ip_info() {
-                    Ok(info) => info.ip != Ipv4Addr::UNSPECIFIED,
-                    Err(_) => true,
-                }
+                && wifi
+                    .sta_netif()
+                    .get_ip_info()
+                    .map_or(true, |info| info.ip != Ipv4Addr::UNSPECIFIED)
         },
     ) {
         bail!("wifi did not connect or did not receive a DHCP lease")
@@ -80,7 +101,7 @@ fn wifi(
         .sta_netif()
         .get_mac()?
         .into_iter()
-        .map(|octet| format!("{:02X}", octet))
+        .map(|octet| format!("{octet:02X}"))
         .intersperse(":".to_owned())
         .collect::<String>();
     Ok((wifi, mac))

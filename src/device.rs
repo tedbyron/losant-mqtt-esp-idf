@@ -2,14 +2,20 @@ use std::time::Duration;
 
 use embedded_svc::mqtt::client::{Event, MessageId, QoS};
 use esp_idf_svc::mqtt::client::{
-    EspMqttClient, EspMqttMessage, LwtConfiguration, MqttClientConfiguration, MqttProtocolVersion,
+    EspMqttClient, EspMqttMessage, MqttClientConfiguration, MqttProtocolVersion,
 };
+use esp_idf_svc::tls::X509;
 use esp_idf_sys::EspError;
 
 use crate::{Error, Result, State};
 
-pub trait MqttEventHandler =
-    for<'b> FnMut(&'b std::result::Result<Event<EspMqttMessage<'b>>, EspError>) + Send + 'static;
+const BROKER_HOST: &str = "broker.losant.com";
+/// See <https://docs.losant.com/mqtt/overview/#message-limits>
+const MAX_PAYLOAD_SIZE: usize = 256_000;
+/// DigiCert Global Root CA certificate.
+#[allow(clippy::doc_markdown)]
+const ROOT_CA_CERT: X509<'_> =
+    X509::pem_until_nul(concat!(include_str!("RootCA.crt"), '\0').as_bytes());
 
 // TODO: docs
 pub struct Device<'a> {
@@ -23,7 +29,19 @@ impl<'a> Device<'a> {
     #[inline]
     #[must_use]
     pub fn builder() -> Builder<'a> {
-        Builder { id: None, secure: true, event_handler: None, config: None, lwt: None }
+        Builder { id: None, secure: true, handler: None, config: None }
+    }
+
+    /// Constructs a new `Device` with the provided `event_handler`, using
+    /// default values for other options.
+    ///
+    /// # Errors
+    ///
+    /// - if a device ID was not provided in cfg.toml
+    /// - if the MQTT client could not be constructed
+    /// - if the client failed to subscribe to the Losant `command` topic
+    pub fn with_handler(event_handler: impl MqttEventHandler) -> Result<Self> {
+        Self::builder().handler(event_handler).build()
     }
 
     /// Publish a message to the broker. `QoS::AtMostOnce` (0) or
@@ -140,7 +158,7 @@ impl<'a> Device<'a> {
             return Err(Error::QoS2NotSupported);
         }
 
-        if payload.len() > crate::MAX_PAYLOAD_SIZE {
+        if payload.len() > MAX_PAYLOAD_SIZE {
             return Err(Error::PayloadSize);
         }
 
@@ -148,14 +166,17 @@ impl<'a> Device<'a> {
     }
 }
 
+pub trait MqttEventHandler =
+    for<'b> FnMut(&'b std::result::Result<Event<EspMqttMessage<'b>>, EspError>) + Send + 'static;
+pub trait ConfigUpdater = FnOnce(&mut MqttClientConfiguration<'_>) + 'static;
+
 // TODO: docs
 #[derive(Default)]
 pub struct Builder<'a> {
     id: Option<&'a str>,
     secure: bool,
-    event_handler: Option<Box<dyn MqttEventHandler>>,
-    config: Option<MqttClientConfiguration<'a>>,
-    lwt: Option<LwtConfiguration<'a>>,
+    handler: Option<Box<dyn MqttEventHandler>>,
+    config: Option<Box<dyn ConfigUpdater>>,
 }
 
 impl<'a> Builder<'a> {
@@ -180,25 +201,17 @@ impl<'a> Builder<'a> {
 
     /// Sets the handler for MQTT events.
     #[must_use]
-    pub fn event_handler(mut self, event_handler: impl MqttEventHandler) -> Self {
-        self.event_handler = Some(Box::new(event_handler));
+    pub fn handler(mut self, handler: impl MqttEventHandler) -> Self {
+        self.handler = Some(Box::new(handler));
         self
     }
 
-    /// Sets the `MqttClientConfiguration`. If `client_id` is set, it will have
-    /// lower priority than `id` or `losant_device_id` in your cfg.toml.
-    #[inline]
+    /// Updates the `MqttClientConfiguration` using the provided closure, after
+    /// the config is built. If `client_id` is set, it will have lower
+    /// priority than `id` or `losant_device_id` in your cfg.toml.
     #[must_use]
-    pub const fn config(mut self, config: MqttClientConfiguration<'a>) -> Self {
-        self.config = Some(config);
-        self
-    }
-
-    /// Sets the last will and testament (LWT) configuration.
-    #[inline]
-    #[must_use]
-    pub const fn lwt(mut self, lwt: LwtConfiguration<'a>) -> Self {
-        self.lwt = Some(lwt);
+    pub fn config(mut self, updater: impl ConfigUpdater) -> Self {
+        self.config = Some(Box::new(updater));
         self
     }
 
@@ -211,15 +224,18 @@ impl<'a> Builder<'a> {
     /// - if the client failed to subscribe to the Losant `command` topic
     #[allow(clippy::missing_panics_doc)]
     pub fn build(self) -> Result<Device<'a>> {
-        let mut config = self.config.unwrap_or_else(|| MqttClientConfiguration {
+        let mut config = MqttClientConfiguration {
             protocol_version: Some(MqttProtocolVersion::V3_1_1),
             keep_alive_interval: Some(Duration::from_secs(90)),
             username: Some(crate::CONFIG.losant_key),
             password: Some(crate::CONFIG.losant_secret),
-            server_certificate: Some(crate::ROOT_CA_CERT),
-            lwt: self.lwt,
+            server_certificate: Some(ROOT_CA_CERT),
             ..MqttClientConfiguration::default()
-        });
+        };
+
+        if let Some(config_fn) = self.config {
+            config_fn(&mut config);
+        }
 
         // client_id can be set from cfg.toml, id(), or config(); prefer id() if called
         if self.id.is_some() {
@@ -238,12 +254,12 @@ impl<'a> Builder<'a> {
             state_topic_form,
             client: EspMqttClient::new(
                 if self.secure {
-                    format!("mqtts://{}", crate::BROKER_HOST)
+                    format!("mqtts://{BROKER_HOST}")
                 } else {
-                    format!("mqtt://{}", crate::BROKER_HOST)
+                    format!("mqtt://{BROKER_HOST}")
                 },
                 &config,
-                self.event_handler.unwrap_or_else(|| Box::new(|_| ())),
+                self.handler.unwrap_or_else(|| Box::new(|_| ())),
             )?,
             config,
         };

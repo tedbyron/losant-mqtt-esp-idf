@@ -48,13 +48,11 @@ fn main() -> anyhow::Result<()> {
     // losant_device_id in cfg.toml, or the client_id field of config()
     //
     // defaults to using TLS, but you can disable it with secure(false)
-    let mut device = Device::builder()
-        .event_handler(|event| match event {
-            Ok(Event::Received(message)) => on_message(message),
-            Ok(event) => println!("MQTT event: {event:?}"),
-            Err(e) => eprintln!("MQTT error: {e}"),
-        })
-        .build()?;
+    let mut device = Device::with_handler(|event| match event {
+        Ok(Event::Received(message)) => on_message(message),
+        Ok(event) => println!("MQTT event: {event:?}"),
+        Err(e) => eprintln!("MQTT error: {e}"),
+    })?;
 
     led.set(RGB8::new(0, 20, 0))?;
 

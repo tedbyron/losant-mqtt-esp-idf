@@ -1,6 +1,8 @@
 [losant-mqtt-esp-idf]
 losant_key = ''
 losant_secret = ''
+# device ID is optional, you can also set it with `DeviceBuilder::id()` or `DeviceBuilder::config()`
+losant_device_id = ''
 
 # required to run examples
 # wifi_ssid = ''

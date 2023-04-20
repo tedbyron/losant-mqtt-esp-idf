@@ -9,6 +9,9 @@ license = "MIT OR Apache-2.0"
 categories = ["embedded"]
 keywords = ["embedded", "mqtt", "losant", "esp32", "espressif"]
 
+[[example]]
+name = "esp32-c3-devkit-rust-1"
+
 [build-dependencies]
 anyhow = "1.0"
 embuild = "0.31"
@@ -17,6 +20,9 @@ embuild = "0.31"
 anyhow = "1.0"
 toml-cfg = "0.1.3"
 esp-idf-hal = "0.40.1"
+esp-idf-sys = { version = "0.32", features = ["binstart"] }
+rgb = "0.8.36"
+shtcx = "0.11.0"
 
 [dependencies]
 embedded-svc = "0.24"
@@ -26,7 +32,4 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml-cfg = "0.1.3"
 thiserror = "1.0"
-
-[[example]]
-name = "wifi"
-required-features = ["esp-idf-sys/binstart"]
+icm42670 = "0.1.1"

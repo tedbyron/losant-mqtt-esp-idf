@@ -41,24 +41,24 @@ use esp_losant_mqtt::Device;
     lsusb # e.g. Bus 001 Device 002: ID 303a:1001 Espressif USB JTAG/serial debug unit
     ```
 
-- run the `wifi` example; replace the `--target` argument with your board's respective compiler
-  target
+- run the `esp32-c3-devkit-rust-1` example; replace the `--target` argument with your board's
+  respective compiler target
 
   - using `espflash` v2
 
     ```sh
-    cargo run --example=wifi --features="esp-idf-sys/binstart" --release --target=riscv32imc-esp-espidf
+    cargo run --example=esp32-c3-devkit-rust-1 --release --target=riscv32imc-esp-espidf
     ```
 
   - using `cargo-espflash` v2
 
     ```sh
-    cargo espflash flash --monitor --example=wifi --features="esp-idf-sys/binstart" --release --target=riscv32imc-esp-espidf
+    cargo espflash flash --monitor --example=esp32-c3-devkit-rust-1 --release --target=riscv32imc-esp-espidf
     ```
 
   - using `espflash` v2 (manual)
 
     ```sh
-    cargo build --example=wifi --features="esp-idf-sys/binstart" --release --target=riscv32imc-esp-espidf
+    cargo build --example=esp32-c3-devkit-rust-1 --release --target=riscv32imc-esp-espidf
     espflash flash --monitor target/riscv32imc-esp-espidf/release/examples/wifi
     ```

@@ -2,21 +2,17 @@
 
 ESP-IDF MQTT Client for connecting devices to the Losant IoT Platform
 
-## Usage
-
-- add Losant info to a `cfg.toml` file in your crate root (make sure to .gitignore!); see
-  `cfg.example.toml`
-
-```rs
-use esp_losant_mqtt::Device;
-
-# TODO
+```toml
+[dependencies]
+losant-mqtt-esp-idf = "1.0"
 ```
 
-- see the [`examples`](https://github.com/tedbyron/losant-mqtt-esp-idf/tree/main/examples) dir
+## Usage
 
-- refer to the [Losant docs](https://docs.losant.com/mqtt/overview/#message-limits) for message
-  limits
+- add your application key and secret to a `cfg.toml` file in your crate root; see
+  [`cfg.example.toml`](https://github.com/tedbyron/losant-mqtt-esp-idf/blob/main/cfg.example.toml)
+
+- see the [`examples`](https://github.com/tedbyron/losant-mqtt-esp-idf/tree/main/examples)
 
 ## Examples
 
@@ -41,8 +37,7 @@ use esp_losant_mqtt::Device;
     lsusb # e.g. Bus 001 Device 002: ID 303a:1001 Espressif USB JTAG/serial debug unit
     ```
 
-- run the `esp32-c3-devkit-rust-1` example; replace the `--target` argument with your board's
-  respective compiler target
+- run an example; replace the `--target` argument with your board's respective compiler target
 
   - using `espflash` v2
 

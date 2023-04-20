@@ -3,14 +3,25 @@
 #![feature(trait_alias)]
 #![doc = include_str!("../README.md")]
 
-use std::{collections::HashMap, marker::PhantomData, time::Duration};
+use std::collections::HashMap;
+use std::marker::PhantomData;
+use std::time::Duration;
 
+use esp_idf_svc::tls::X509;
 use esp_idf_sys::EspError;
 pub use serde_json::json;
 
 mod device;
 
-pub use device::{Builder as DeviceBuilder, Device, MqttEventHandler};
+pub use device::{Device, MqttEventHandler};
+
+pub const BROKER_HOST: &str = "broker.losant.com";
+/// See <https://docs.losant.com/mqtt/overview/#message-limits>
+const MAX_PAYLOAD_SIZE: usize = 256_000;
+/// DigiCert Global Root CA certificate.
+#[allow(clippy::doc_markdown)]
+pub const ROOT_CA_CERT: X509<'_> =
+    X509::pem_until_nul(concat!(include_str!("RootCA.crt"), '\0').as_bytes());
 
 #[toml_cfg::toml_config]
 struct Config {

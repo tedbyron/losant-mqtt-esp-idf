@@ -1,35 +1,33 @@
 #![warn(clippy::all, clippy::nursery, clippy::pedantic, rust_2018_idioms)]
 #![forbid(unsafe_code)]
 
-use std::{thread, time::Duration};
+use std::thread;
+use std::time::Duration;
 
 use embedded_svc::mqtt::client::{Details, Event, QoS};
-use esp_idf_hal::{
-    delay::Ets,
-    i2c::{config::Config as I2cConfig, I2cDriver},
-    prelude::Peripherals,
-};
-use esp_idf_svc::{
-    eventloop::EspSystemEventLoop, log::EspLogger, mqtt::client::EspMqttMessage,
-    nvs::EspDefaultNvsPartition,
-};
+use esp_idf_hal::delay::Ets;
+use esp_idf_hal::i2c::config::Config as I2cConfig;
+use esp_idf_hal::i2c::I2cDriver;
+use esp_idf_hal::prelude::Peripherals;
+use esp_idf_svc::eventloop::EspSystemEventLoop;
+use esp_idf_svc::log::EspLogger;
+use esp_idf_svc::mqtt::client::EspMqttMessage;
+use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use losant_mqtt_esp_idf::{json, Device};
 
 mod util;
 
-use util::{
-    led::{Ws2812Rmt, RGB8},
-    wifi,
-};
+use util::led::{Ws2812Rmt, RGB8};
+use util::wifi;
 
 fn main() -> anyhow::Result<()> {
     esp_idf_sys::link_patches();
     EspLogger::initialize_default();
-    EspDefaultNvsPartition::take()?; // must initialize nvs for wifi
+    EspDefaultNvsPartition::take()?;
 
     let peripherals = Peripherals::take().unwrap();
     let sysloop = EspSystemEventLoop::take()?;
-    let _wifi = wifi::connect(peripherals.modem, &sysloop)?; // don't drop or wifi will disconnect
+    let _wifi = wifi::connect(peripherals.modem, &sysloop)?;
     let mut led = Ws2812Rmt::new(peripherals.pins.gpio2, peripherals.rmt.channel0)?;
     let i2c = I2cDriver::new(
         peripherals.i2c0,
@@ -46,7 +44,7 @@ fn main() -> anyhow::Result<()> {
     // the device will automatically connect to the broker and subscribe to the
     // command topic
     //
-    // you can set the device ID with, in order of precedence: id(),
+    // you can set the device ID with, in order of priority: id(),
     // losant_device_id in cfg.toml, or the client_id field of config()
     //
     // defaults to using TLS, but you can disable it with secure(false)

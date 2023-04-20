@@ -1,24 +1,12 @@
+use std::time::Duration;
+
 use embedded_svc::mqtt::client::{Event, MessageId, QoS};
-use esp_idf_svc::{
-    mqtt::client::{EspMqttClient, EspMqttMessage, MqttClientConfiguration, MqttProtocolVersion},
-    tls::X509,
+use esp_idf_svc::mqtt::client::{
+    EspMqttClient, EspMqttMessage, LwtConfiguration, MqttClientConfiguration, MqttProtocolVersion,
 };
 use esp_idf_sys::EspError;
 
 use crate::{Error, Result, State};
-
-const BROKER_URL_TCP: &str = "mqtt://broker.losant.com:1883";
-const BROKER_URL_TLS: &str = "mqtts://broker.losant.com:8883";
-
-/// See <https://docs.losant.com/mqtt/overview/#message-limits>
-const MAX_PAYLOAD_SIZE: usize = 256_000;
-
-/// DigiCert Global Root CA certificate.
-///
-/// See <https://docs.losant.com/mqtt/overview/#root-ca-certificate>
-#[allow(clippy::doc_markdown)]
-const ROOT_CA_CERT: X509<'_> =
-    X509::pem_until_nul(concat!(include_str!("RootCA.crt"), '\0').as_bytes());
 
 pub trait MqttEventHandler =
     for<'b> FnMut(&'b std::result::Result<Event<EspMqttMessage<'b>>, EspError>) + Send + 'static;
@@ -35,7 +23,7 @@ impl<'a> Device<'a> {
     #[inline]
     #[must_use]
     pub fn builder() -> Builder<'a> {
-        Builder { id: None, secure: true, event_handler: None, config: None }
+        Builder { id: None, secure: true, event_handler: None, config: None, lwt: None }
     }
 
     /// Publish a message to the broker. `QoS::AtMostOnce` (0) or
@@ -152,7 +140,7 @@ impl<'a> Device<'a> {
             return Err(Error::QoS2NotSupported);
         }
 
-        if payload.len() > MAX_PAYLOAD_SIZE {
+        if payload.len() > crate::MAX_PAYLOAD_SIZE {
             return Err(Error::PayloadSize);
         }
 
@@ -167,6 +155,7 @@ pub struct Builder<'a> {
     secure: bool,
     event_handler: Option<Box<dyn MqttEventHandler>>,
     config: Option<MqttClientConfiguration<'a>>,
+    lwt: Option<LwtConfiguration<'a>>,
 }
 
 impl<'a> Builder<'a> {
@@ -180,8 +169,8 @@ impl<'a> Builder<'a> {
         self
     }
 
-    /// If `false`, TCP will be used (mqtt, port 1883). Otherwise, TLS will be
-    /// used (mqtts, port 8883)
+    /// If set `false`, TCP will be used (mqtt, port 1883). Otherwise, TLS will
+    /// be used (mqtts, port 8883)
     #[inline]
     #[must_use]
     pub const fn secure(mut self, secure: bool) -> Self {
@@ -205,6 +194,14 @@ impl<'a> Builder<'a> {
         self
     }
 
+    /// Sets the last will and testament (LWT) configuration.
+    #[inline]
+    #[must_use]
+    pub const fn lwt(mut self, lwt: LwtConfiguration<'a>) -> Self {
+        self.lwt = Some(lwt);
+        self
+    }
+
     /// Consumes the `Builder` to create a `Device`.
     ///
     /// # Errors
@@ -216,9 +213,11 @@ impl<'a> Builder<'a> {
     pub fn build(self) -> Result<Device<'a>> {
         let mut config = self.config.unwrap_or_else(|| MqttClientConfiguration {
             protocol_version: Some(MqttProtocolVersion::V3_1_1),
+            keep_alive_interval: Some(Duration::from_secs(90)),
             username: Some(crate::CONFIG.losant_key),
             password: Some(crate::CONFIG.losant_secret),
-            server_certificate: Some(ROOT_CA_CERT),
+            server_certificate: Some(crate::ROOT_CA_CERT),
+            lwt: self.lwt,
             ..MqttClientConfiguration::default()
         });
 
@@ -238,7 +237,11 @@ impl<'a> Builder<'a> {
         let mut device = Device {
             state_topic_form,
             client: EspMqttClient::new(
-                if self.secure { BROKER_URL_TLS } else { BROKER_URL_TCP },
+                if self.secure {
+                    format!("mqtts://{}", crate::BROKER_HOST)
+                } else {
+                    format!("mqtt://{}", crate::BROKER_HOST)
+                },
                 &config,
                 self.event_handler.unwrap_or_else(|| Box::new(|_| ())),
             )?,

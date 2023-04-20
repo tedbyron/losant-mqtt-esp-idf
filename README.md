@@ -18,7 +18,7 @@ use esp_losant_mqtt::Device;
 - refer to the [Losant docs](https://docs.losant.com/mqtt/overview/#message-limits) for message
   limits
 
-## Running examples
+## Examples
 
 - add Losant and wifi info to a `cfg.toml` file in the crate root (make sure to .gitignore!); see
   `cfg.example.toml`

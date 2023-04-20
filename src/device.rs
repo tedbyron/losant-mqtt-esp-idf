@@ -51,8 +51,9 @@ impl<'a> Device<'a> {
         topic: impl AsRef<str>,
         qos: QoS,
         retain: bool,
-        payload: &[u8],
+        payload: impl AsRef<[u8]>,
     ) -> Result<MessageId> {
+        let payload = payload.as_ref();
         Self::check_publish(qos, payload)?;
         self.client.publish(topic.as_ref(), qos, retain, payload).map_err(Error::from)
     }
@@ -69,8 +70,9 @@ impl<'a> Device<'a> {
         topic: impl AsRef<str>,
         qos: QoS,
         retain: bool,
-        payload: &[u8],
+        payload: impl AsRef<[u8]>,
     ) -> Result<MessageId> {
+        let payload = payload.as_ref();
         Self::check_publish(qos, payload)?;
         self.client.enqueue(topic.as_ref(), qos, retain, payload).map_err(Error::from)
     }

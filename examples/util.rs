@@ -2,11 +2,10 @@ pub mod led {
     use std::time::Duration;
 
     use anyhow::Result;
-    use esp_idf_hal::{
-        gpio::OutputPin,
-        peripheral::Peripheral,
-        rmt::{config::TransmitConfig, FixedLengthSignal, PinState, Pulse, TxRmtDriver, CHANNEL0},
-    };
+    use esp_idf_hal::gpio::OutputPin;
+    use esp_idf_hal::peripheral::Peripheral;
+    use esp_idf_hal::rmt::config::TransmitConfig;
+    use esp_idf_hal::rmt::{FixedLengthSignal, PinState, Pulse, TxRmtDriver, CHANNEL0};
     pub use rgb::RGB8;
 
     pub struct Ws2812Rmt<'a> {
@@ -25,19 +24,19 @@ pub mod led {
         }
 
         pub fn set(&mut self, rgb: RGB8) -> Result<()> {
-            let color: u32 = ((rgb.g as u32) << 16) | ((rgb.r as u32) << 8) | rgb.b as u32;
+            let color: u32 = (u32::from(rgb.g) << 16) | (u32::from(rgb.r) << 8) | u32::from(rgb.b);
             let ticks_hz = self.tx_rmt_driver.counter_clock()?;
-            let t0h = Pulse::new_with_duration(ticks_hz, PinState::High, &ns(350))?;
-            let t0l = Pulse::new_with_duration(ticks_hz, PinState::Low, &ns(800))?;
-            let t1h = Pulse::new_with_duration(ticks_hz, PinState::High, &ns(700))?;
-            let t1l = Pulse::new_with_duration(ticks_hz, PinState::Low, &ns(600))?;
+            let t0_hi = Pulse::new_with_duration(ticks_hz, PinState::High, &ns(350))?;
+            let t0_lo = Pulse::new_with_duration(ticks_hz, PinState::Low, &ns(800))?;
+            let t1_hi = Pulse::new_with_duration(ticks_hz, PinState::High, &ns(700))?;
+            let t1_lo = Pulse::new_with_duration(ticks_hz, PinState::Low, &ns(600))?;
             let mut signal = FixedLengthSignal::<24>::new();
 
             for i in (0..24).rev() {
                 let p = 2_u32.pow(i);
                 let bit = p & color != 0;
-                let (high_pulse, low_pulse) = if bit { (t1h, t1l) } else { (t0h, t0l) };
-                signal.set(23 - i as usize, &(high_pulse, low_pulse))?;
+                let (pulse_hi, pulse_lo) = if bit { (t1_hi, t1_lo) } else { (t0_hi, t0_lo) };
+                signal.set(23 - i as usize, &(pulse_hi, pulse_lo))?;
             }
 
             Ok(self.tx_rmt_driver.start_blocking(&signal)?)
@@ -50,16 +49,16 @@ pub mod led {
 }
 
 pub mod wifi {
-    use std::{net::Ipv4Addr, time::Duration};
+    use std::net::Ipv4Addr;
+    use std::time::Duration;
 
     use anyhow::{anyhow, bail, Result};
     use embedded_svc::wifi::{ClientConfiguration, Configuration, Wifi};
-    use esp_idf_hal::{modem::Modem, peripheral::Peripheral};
-    use esp_idf_svc::{
-        eventloop::EspSystemEventLoop,
-        netif::{EspNetif, EspNetifWait},
-        wifi::{EspWifi, WifiWait},
-    };
+    use esp_idf_hal::modem::Modem;
+    use esp_idf_hal::peripheral::Peripheral;
+    use esp_idf_svc::eventloop::EspSystemEventLoop;
+    use esp_idf_svc::netif::{EspNetif, EspNetifWait};
+    use esp_idf_svc::wifi::{EspWifi, WifiWait};
 
     #[toml_cfg::toml_config]
     struct Config {

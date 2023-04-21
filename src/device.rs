@@ -17,6 +17,17 @@ const MAX_PAYLOAD_SIZE: usize = 256_000;
 const ROOT_CA_CERT: X509<'_> =
     X509::pem_until_nul(concat!(include_str!("RootCA.crt"), '\0').as_bytes());
 
+pub trait MqttEventHandler =
+    for<'b> FnMut(&'b std::result::Result<Event<EspMqttMessage<'b>>, EspError>) + Send + 'static;
+pub trait ConfigUpdater = FnOnce(&mut MqttClientConfiguration<'_>) + 'static;
+pub trait CommandHandler = FnMut(&'static str) + 'static;
+
+/// Create Losant state and command topic forms using the specified `id`.
+#[inline]
+fn topic_forms(id: &str) -> (String, String) {
+    (format!("losant/{id}/state"), format!("losant/{id}/command"))
+}
+
 // TODO: docs
 pub struct Device<'a> {
     state_topic_form: String,
@@ -32,16 +43,16 @@ impl<'a> Device<'a> {
         Builder { id: None, secure: true, handler: None, config: None }
     }
 
-    /// Constructs a new `Device` with the provided `event_handler`, using
-    /// default values for other options.
+    /// Constructs a new `Device` with the provided event `handler`, using
+    /// default values for other `Device` options.
     ///
     /// # Errors
     ///
     /// - if a device ID was not provided in cfg.toml
     /// - if the MQTT client could not be constructed
     /// - if the client failed to subscribe to the Losant `command` topic
-    pub fn with_handler(event_handler: impl MqttEventHandler) -> Result<Self> {
-        Self::builder().handler(event_handler).build()
+    pub fn with_handler(handler: impl MqttEventHandler) -> Result<Self> {
+        Self::builder().handler(handler).build()
     }
 
     /// Publish a message to the broker. `QoS::AtMostOnce` (0) or
@@ -95,12 +106,18 @@ impl<'a> Device<'a> {
     /// - if there was an error publishing the payload
     ///
     /// See <https://docs.losant.com/mqtt/overview/#publishing-device-state>
-    pub fn publish_state(
+    pub fn publish_state<Data, Time, FlowVersion, Meta>(
         &mut self,
         qos: QoS,
         retain: bool,
-        state: &State<'_>,
-    ) -> Result<MessageId> {
+        state: &State<'_, Data, Time, FlowVersion, Meta>,
+    ) -> Result<MessageId>
+    where
+        Data: serde::Serialize,
+        Time: serde::Serialize,
+        FlowVersion: serde::Serialize,
+        Meta: serde::Serialize,
+    {
         let payload = serde_json::to_string(&state).map_err(Error::from)?;
         let payload = payload.as_bytes();
         Self::check_publish(qos, payload)?;
@@ -166,10 +183,6 @@ impl<'a> Device<'a> {
     }
 }
 
-pub trait MqttEventHandler =
-    for<'b> FnMut(&'b std::result::Result<Event<EspMqttMessage<'b>>, EspError>) + Send + 'static;
-pub trait ConfigUpdater = FnOnce(&mut MqttClientConfiguration<'_>) + 'static;
-
 // TODO: docs
 #[derive(Default)]
 pub struct Builder<'a> {
@@ -180,9 +193,8 @@ pub struct Builder<'a> {
 }
 
 impl<'a> Builder<'a> {
-    /// Sets the device ID. This ID is preferred over
-    /// `losant_mqtt_esp_idf::CONFIG.losant_device_id` or `losant_device_id` in
-    /// cfg.toml.
+    /// Sets the device ID. This ID is preferred over `client_id` set in
+    /// `config()` or `losant_device_id` in cfg.toml.
     #[inline]
     #[must_use]
     pub const fn id(mut self, id: &'a str) -> Self {
@@ -208,7 +220,7 @@ impl<'a> Builder<'a> {
 
     /// Updates the `MqttClientConfiguration` using the provided closure, after
     /// the config is built. If `client_id` is set, it will have lower
-    /// priority than `id` or `losant_device_id` in your cfg.toml.
+    /// priority than `id()` or `losant_device_id` in cfg.toml.
     #[must_use]
     pub fn config(mut self, updater: impl ConfigUpdater) -> Self {
         self.config = Some(Box::new(updater));
@@ -222,10 +234,11 @@ impl<'a> Builder<'a> {
     /// - if a device ID was not provided
     /// - if the MQTT client could not be constructed
     /// - if the client failed to subscribe to the Losant `command` topic
-    #[allow(clippy::missing_panics_doc)]
     pub fn build(self) -> Result<Device<'a>> {
         let mut config = MqttClientConfiguration {
+            // https://docs.losant.com/mqtt/overview/#mqtt-version-and-limitations
             protocol_version: Some(MqttProtocolVersion::V3_1_1),
+            // keepalive timeout: https://docs.losant.com/devices/overview/#connection-log
             keep_alive_interval: Some(Duration::from_secs(90)),
             username: Some(crate::CONFIG.losant_key),
             password: Some(crate::CONFIG.losant_secret),
@@ -243,12 +256,9 @@ impl<'a> Builder<'a> {
         } else if !crate::CONFIG.losant_device_id.is_empty() {
             config.client_id = Some(crate::CONFIG.losant_device_id);
         }
-        if config.client_id.is_none() {
-            return Err(Error::MissingId);
-        }
 
-        // unwrap: client_id is checked above
-        let (state_topic_form, command_topic_form) = Self::topic_forms(config.client_id.unwrap());
+        let (state_topic_form, command_topic_form) =
+            topic_forms(config.client_id.ok_or(Error::MissingId)?);
 
         let mut device = Device {
             state_topic_form,
@@ -266,11 +276,5 @@ impl<'a> Builder<'a> {
         device.subscribe(command_topic_form)?;
 
         Ok(device)
-    }
-
-    /// Create Losant state and command topic forms using the specified `id`.
-    #[inline]
-    fn topic_forms(id: &str) -> (String, String) {
-        (format!("losant/{id}/state"), format!("losant/{id}/command"))
     }
 }

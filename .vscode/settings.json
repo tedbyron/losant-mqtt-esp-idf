@@ -1,5 +1,4 @@
 {
   "rust-analyzer.check.allTargets": false,
-  "rust-analyzer.cargo.target": "riscv32imc-esp-espidf",
-  "todo-tree.tree.scanMode": "workspace"
+  "rust-analyzer.cargo.target": "riscv32imc-esp-espidf"
 }

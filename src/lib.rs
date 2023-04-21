@@ -3,7 +3,6 @@
 #![feature(trait_alias)]
 #![doc = include_str!("../README.md")]
 
-use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::time::Duration;
 
@@ -11,6 +10,7 @@ use esp_idf_sys::EspError;
 pub use serde_json::json;
 
 mod device;
+pub mod serde;
 
 pub use device::{Device, MqttEventHandler};
 
@@ -28,18 +28,14 @@ struct Config {
 pub enum Error {
     #[error(transparent)]
     Esp(#[from] EspError),
-
     #[error(transparent)]
     Json(#[from] serde_json::Error),
-
     #[error("a device ID was not provided")]
     MissingId,
-
     #[error(
         "invalid QoS: expected `AtMostOnce` (0) or `AtLeastOnce` (1), found `ExactlyOnce` (2)"
     )]
     QoS2NotSupported,
-
     #[error("payload exceeded maximum size of 256KB")]
     PayloadSize,
 }
@@ -49,18 +45,15 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// `esp_idf_svc::systime::EspSystemTime::now()`.
 ///
 /// See <https://docs.losant.com/mqtt/overview/#publishing-device-state>
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, ::serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct State<
-    'a,
-    Data = HashMap<&'a str, &'a str>,
-    Time = Duration,
-    FlowVersion = &'a str,
-    Meta = HashMap<&'a str, &'a str>,
-> {
+pub struct State<'a, Data, Time = Duration, FlowVersion = &'a str, Meta = ()> {
     pub data: Data,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub time: Option<Time>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub flow_version: Option<FlowVersion>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
 
     phantom: PhantomData<&'a ()>,
@@ -69,8 +62,8 @@ pub struct State<
 /// A deserializable Losant `command` topic message.
 ///
 /// See <https://docs.losant.com/mqtt/overview/#subscribing-to-commands>
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
-pub struct Command<'a, Name = &'a str, Payload = HashMap<&'a str, &'a str>> {
+#[derive(Debug, Clone, PartialEq, Eq, ::serde::Deserialize)]
+pub struct Command<'a, Payload, Name = &'a str> {
     pub name: Name,
     pub payload: Payload,
 

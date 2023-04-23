@@ -17,10 +17,10 @@ const MAX_PAYLOAD_SIZE: usize = 256_000;
 const ROOT_CA_CERT: X509<'_> =
     X509::pem_until_nul(concat!(include_str!("RootCA.crt"), '\0').as_bytes());
 
-pub trait MqttEventHandler =
-    for<'b> FnMut(&'b std::result::Result<Event<EspMqttMessage<'b>>, EspError>) + Send + 'static;
+pub type EventResult<'a> = std::result::Result<Event<EspMqttMessage<'a>>, EspError>;
+pub trait EventResultHandler = for<'b> FnMut(&'b EventResult<'b>) + Send + 'static;
 pub trait ConfigUpdater = FnOnce(&mut MqttClientConfiguration<'_>) + 'static;
-pub trait CommandHandler<Payload = ()> = FnMut(&str, Payload) + Send + 'static;
+pub trait CommandHandler<Command> = for<'b> FnMut(&'b Command) + Send + 'static;
 
 /// Create Losant state and command topic forms using the specified `id`.
 #[inline]
@@ -39,7 +39,7 @@ impl<'a> Device<'a> {
     /// Create a `Builder` for building a `Device`.
     #[inline]
     #[must_use]
-    pub fn builder() -> Builder<'a> {
+    pub fn builder<Payload>() -> Builder<'a, Payload> {
         Builder {
             id: None,
             secure: true,
@@ -57,8 +57,8 @@ impl<'a> Device<'a> {
     /// - if a device ID was not provided in cfg.toml
     /// - if the MQTT client could not be constructed
     /// - if the client failed to subscribe to the Losant `command` topic
-    pub fn with_handler(handler: impl MqttEventHandler) -> Result<Self> {
-        Self::builder().handler(handler).build()
+    pub fn with_handler(handler: impl EventResultHandler) -> Result<Self> {
+        Self::builder::<()>().handler(handler).build()
     }
 
     /// Publish a message to the broker. `QoS::AtMostOnce` (0) or
@@ -116,7 +116,7 @@ impl<'a> Device<'a> {
     /// - if there was an error publishing the payload
     ///
     /// See <https://docs.losant.com/mqtt/overview/#publishing-device-state>
-    pub fn publish_state<Data>(
+    pub fn send_state<Data>(
         &mut self,
         qos: QoS,
         retain: bool,
@@ -146,7 +146,7 @@ impl<'a> Device<'a> {
     ///
     /// See <https://docs.losant.com/mqtt/overview/#publishing-device-state>
     #[allow(clippy::needless_pass_by_value)]
-    pub fn publish_state_json(
+    pub fn send_state_json(
         &mut self,
         qos: QoS,
         retain: bool,
@@ -198,15 +198,18 @@ impl<'a> Device<'a> {
 
 // TODO: docs
 #[derive(Default)]
-pub struct Builder<'a> {
+pub struct Builder<'a, Command> {
     id: Option<&'a str>,
     secure: bool,
-    handler: Option<Box<dyn MqttEventHandler>>,
-    command_handler: Option<&'a dyn CommandHandler>,
+    handler: Option<Box<dyn EventResultHandler>>,
+    command_handler: Option<Box<dyn CommandHandler<Command>>>,
     config: Option<Box<dyn ConfigUpdater>>,
 }
 
-impl<'a> Builder<'a> {
+impl<'a, Command> Builder<'a, Command>
+where
+    Command: for<'de> serde::Deserialize<'de> + 'static,
+{
     /// Sets the device ID. This ID is preferred over `client_id` set in
     /// `config()` or `losant_device_id` in cfg.toml.
     #[inline]
@@ -227,15 +230,15 @@ impl<'a> Builder<'a> {
 
     /// Sets the handler for all MQTT events.
     #[must_use]
-    pub fn handler(mut self, handler: impl MqttEventHandler) -> Self {
+    pub fn handler(mut self, handler: impl EventResultHandler) -> Self {
         self.handler = Some(Box::new(handler));
         self
     }
 
     /// Sets the handler for all Losant broker command messages.
     #[must_use]
-    pub fn command_handler(mut self, handler: &'a impl CommandHandler) -> Self {
-        self.command_handler = Some(handler);
+    pub fn command_handler(mut self, handler: impl CommandHandler<Command>) -> Self {
+        self.command_handler = Some(Box::new(handler));
         self
     }
 
@@ -280,15 +283,24 @@ impl<'a> Builder<'a> {
 
         let (state_topic_form, command_topic_form) =
             topic_forms(config.client_id.ok_or(Error::MissingId)?);
-        let handler = self.handler.unwrap_or_else(|| Box::new(|_| ()));
-        let callback: Box<
-            dyn for<'b> FnMut(&'b std::result::Result<Event<EspMqttMessage<'b>>, EspError>)
-                + Send
-                + 'static,
-        > = Box::new(|event| {
-            if let Ok(Event::Received(msg)) = event && msg.topic() == Some(&command_topic_form.clone()){
-            } else {
+        let command_topic = command_topic_form.clone();
+        let mut handler = self.handler.unwrap_or_else(|| Box::new(|_| {}));
+        let mut command_handler = self.command_handler.unwrap_or_else(|| Box::new(|_| {}));
+        let callback = Box::new(move |event: &EventResult<'_>| {
+            // handle commands if they match the command topic and data can be parsed as Payload
+            if let Ok(Event::Received(msg)) = event {
+                if let Some(topic) = msg.topic() {
+                    if topic == command_topic.as_str() {
+                        if let Ok(command) = serde_json::from_slice::<Command>(msg.data()) {
+                            command_handler(&command);
+                        }
+
+                        return;
+                    }
+                }
             }
+
+            handler(event);
         });
 
         let mut device = Device {

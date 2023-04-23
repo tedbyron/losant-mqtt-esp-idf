@@ -23,8 +23,9 @@ pub mod led {
             Ok(Self { tx_rmt_driver })
         }
 
-        pub fn set(&mut self, rgb: RGB8) -> Result<()> {
-            let color: u32 = (u32::from(rgb.g) << 16) | (u32::from(rgb.r) << 8) | u32::from(rgb.b);
+        pub fn set(&mut self, color: RGB8) -> Result<()> {
+            let color: u32 =
+                (u32::from(color.g) << 16) | (u32::from(color.r) << 8) | u32::from(color.b);
             let ticks_hz = self.tx_rmt_driver.counter_clock()?;
             let t0_hi = Pulse::new_with_duration(ticks_hz, PinState::High, &ns(350))?;
             let t0_lo = Pulse::new_with_duration(ticks_hz, PinState::Low, &ns(800))?;
@@ -88,9 +89,9 @@ pub mod wifi {
         }))?;
 
         wifi.start()?;
-        if !WifiWait::new(sysloop)?
-            .wait_with_timeout(Duration::from_secs(20), || wifi.is_started().unwrap_or(true))
-        {
+        if !WifiWait::new(sysloop)?.wait_with_timeout(Duration::from_secs(20), || {
+            wifi.is_started().unwrap_or(true)
+        }) {
             bail!("wifi did not start");
         }
 

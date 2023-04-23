@@ -6,7 +6,7 @@
     rust_2018_idioms
 )]
 #![forbid(unsafe_code)]
-#![feature(trait_alias, let_chains)]
+#![feature(trait_alias)]
 #![doc = include_str!("../README.md")]
 
 use std::marker::PhantomData;
@@ -18,7 +18,7 @@ pub use serde_json::json;
 mod device;
 pub mod serde;
 
-pub use device::{Device, MqttEventHandler};
+pub use device::*;
 
 #[toml_cfg::toml_config]
 struct Config {
@@ -61,17 +61,6 @@ pub struct State<'a, Data, Time = Duration, FlowVersion = &'a str, Meta = ()> {
     pub flow_version: Option<FlowVersion>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
-
-    phantom: PhantomData<&'a ()>,
-}
-
-/// A deserializable Losant `command` topic message.
-///
-/// See <https://docs.losant.com/mqtt/overview/#subscribing-to-commands>
-#[derive(Debug, Clone, PartialEq, Eq, ::serde::Deserialize)]
-pub struct Command<'a, Payload, Name = &'a str> {
-    pub name: Name,
-    pub payload: Payload,
 
     phantom: PhantomData<&'a ()>,
 }

@@ -7,7 +7,7 @@ use esp_idf_svc::mqtt::client::{
 use esp_idf_svc::tls::X509;
 use esp_idf_sys::EspError;
 
-use crate::{Error, Result};
+use crate::{client::Client, Error, Result};
 
 const BROKER_HOST: &str = "broker.losant.com";
 /// See <https://docs.losant.com/mqtt/overview/#message-limits>
@@ -33,7 +33,7 @@ impl<'a> Device<'a> {
     /// Create a `Builder` for building a `Device`.
     #[inline]
     #[must_use]
-    pub fn builder<Payload>() -> Builder<'a, Payload> {
+    pub fn builder<Command>() -> Builder<'a, Command> {
         Builder {
             id: None,
             secure: true,
@@ -43,15 +43,24 @@ impl<'a> Device<'a> {
         }
     }
 
-    /// Publish a message to the broker. `QoS::AtMostOnce` (0) or
-    /// `QoS::AtLeastOnce` (1) must be used.
-    ///
-    /// # Errors
-    ///
-    /// - if `QoS::ExactlyOnce` (2) is used
-    /// - if the payload is larger than 256KB
-    /// - if there was an error publishing the payload
-    pub fn publish(
+    /// Check QoS and payload size for use in message publishing functions.
+    #[inline]
+    #[allow(clippy::doc_markdown)]
+    fn check_publish(qos: QoS, payload: &[u8]) -> Result<()> {
+        if qos == QoS::ExactlyOnce {
+            return Err(Error::QoS2NotSupported);
+        }
+
+        if payload.len() > MAX_PAYLOAD_SIZE {
+            return Err(Error::PayloadSize);
+        }
+
+        Ok(())
+    }
+}
+
+impl<'a> Client for Device<'a> {
+    fn publish(
         &mut self,
         topic: impl AsRef<str>,
         qos: QoS,
@@ -65,14 +74,7 @@ impl<'a> Device<'a> {
             .map_err(Error::from)
     }
 
-    /// Enqueue a message to be sent later (non-blocking `publish()`).
-    ///
-    /// # Errors
-    ///
-    /// - if `QoS::ExactlyOnce` (2) is used
-    /// - if the payload is larger than 256KB
-    /// - if there was an error publishing the payload
-    pub fn enqueue(
+    fn enqueue(
         &mut self,
         topic: impl AsRef<str>,
         qos: QoS,
@@ -86,19 +88,7 @@ impl<'a> Device<'a> {
             .map_err(Error::from)
     }
 
-    /// Publish device state to the broker. `QoS::AtMostOnce` (0) or
-    /// `QoS::AtLeastOnce` (1) must be used.
-    ///
-    /// Takes a reference `state` to allow its reuse.
-    ///
-    /// # Errors
-    ///
-    /// - if `QoS::ExactlyOnce` (2) is used
-    /// - if the payload is larger than 256KB
-    /// - if there was an error publishing the payload
-    ///
-    /// See <https://docs.losant.com/mqtt/overview/#publishing-device-state>
-    pub fn send_state<S>(&mut self, qos: QoS, retain: bool, state: &S) -> Result<MessageId>
+    fn send_state<S>(&mut self, qos: QoS, retain: bool, state: &S) -> Result<MessageId>
     where
         S: serde::Serialize,
     {
@@ -110,20 +100,7 @@ impl<'a> Device<'a> {
             .map_err(Error::from)
     }
 
-    /// Publish device state to the broker. `QoS::AtMostOnce` (0) or
-    /// `QoS::AtLeastOnce` (1) must be used.
-    ///
-    /// If `state` needs to be reused, consider `publish_state()` instead.
-    ///
-    /// # Errors
-    ///
-    /// - if `QoS::ExactlyOnce` (2) is used
-    /// - if the payload is larger than 256KB
-    /// - if there was an error publishing the payload
-    ///
-    /// See <https://docs.losant.com/mqtt/overview/#publishing-device-state>
-    #[allow(clippy::needless_pass_by_value)]
-    pub fn send_state_json(
+    fn send_state_json(
         &mut self,
         qos: QoS,
         retain: bool,
@@ -137,39 +114,14 @@ impl<'a> Device<'a> {
             .map_err(Error::from)
     }
 
-    /// Subscribe to the `topic`. `QoS::AtMostOnce` (0) is used.
-    ///
-    /// # Errors
-    ///
-    /// - if there was an error subscribing to the topic
-    pub fn subscribe(&mut self, topic: impl AsRef<str>) -> Result<MessageId> {
+    fn subscribe(&mut self, topic: impl AsRef<str>) -> Result<MessageId> {
         self.client
             .subscribe(topic.as_ref(), QoS::AtMostOnce)
             .map_err(Error::from)
     }
 
-    /// Unsubscribe from the `topic`.
-    ///
-    /// # Errors
-    ///
-    /// - if there was an error unsubscribing from the topic
-    pub fn unsubscribe(&mut self, topic: impl AsRef<str>) -> Result<MessageId> {
+    fn unsubscribe(&mut self, topic: impl AsRef<str>) -> Result<MessageId> {
         self.client.unsubscribe(topic.as_ref()).map_err(Error::from)
-    }
-
-    /// Check QoS and payload size for use in message publishing functions.
-    #[inline]
-    #[allow(clippy::doc_markdown)] // complains about "QoS"
-    fn check_publish(qos: QoS, payload: &[u8]) -> Result<()> {
-        if qos == QoS::ExactlyOnce {
-            return Err(Error::QoS2NotSupported);
-        }
-
-        if payload.len() > MAX_PAYLOAD_SIZE {
-            return Err(Error::PayloadSize);
-        }
-
-        Ok(())
     }
 }
 
@@ -205,14 +157,15 @@ where
         self
     }
 
-    /// Sets the handler for all MQTT events.
+    /// Sets the handler for all MQTT events except Losant commands, which are
+    /// intercepted by `command_handler()`.
     #[must_use]
     pub fn handler(mut self, handler: impl EventResultHandler) -> Self {
         self.handler = Some(Box::new(handler));
         self
     }
 
-    /// Sets the handler for all Losant broker command messages.
+    /// Sets the handler for all Losant command messages.
     #[must_use]
     pub fn command_handler(mut self, handler: impl CommandHandler<Command>) -> Self {
         self.command_handler = Some(Box::new(handler));
@@ -235,6 +188,7 @@ where
     /// - if a device ID was not provided
     /// - if the MQTT client could not be constructed
     /// - if the client failed to subscribe to the Losant `command` topic
+    #[allow(clippy::missing_panics_doc)]
     pub fn build(self) -> Result<Device<'a>> {
         let mut config = MqttClientConfiguration {
             // https://docs.losant.com/mqtt/overview/#mqtt-version-and-limitations
@@ -257,35 +211,41 @@ where
             config.client_id = Some(crate::CONFIG.losant_device_id);
         }
 
-        let (state_topic, command_topic) = Self::topics(config.client_id.ok_or(Error::MissingId)?);
-        let command_topic_clone = command_topic.clone();
         let mut handler = self.handler.unwrap_or_else(|| Box::new(|_| {}));
         let mut command_handler = self.command_handler.unwrap_or_else(|| Box::new(|_| {}));
-        let callback = Box::new(move |event: &EventResult<'_>| {
-            if let Ok(Event::Received(msg)) = event {
-                if let Some(topic) = msg.topic() {
-                    if topic == command_topic_clone.as_str() {
-                        if let Ok(command) = serde_json::from_slice::<Command>(msg.data()) {
-                            command_handler(&command);
+        let (state_topic, command_topic) = Self::topics(config.client_id.ok_or(Error::MissingId)?);
+        let client = EspMqttClient::new(
+            format!("mqtt{}://{BROKER_HOST}", if self.secure { "s" } else { "" }),
+            &config,
+            {
+                let command_topic = command_topic.clone();
+                move |event| {
+                    if let Ok(Event::Connected(_)) = event {}
+
+                    if let Ok(Event::Received(msg)) = event {
+                        if let Some(topic) = msg.topic() {
+                            if topic == &*command_topic {
+                                if let Ok(command) = serde_json::from_slice::<Command>(msg.data()) {
+                                    {
+                                        command_handler(&command);
+                                    }
+                                }
+
+                                return;
+                            }
                         }
-
-                        return;
                     }
+
+                    handler(event);
                 }
-            }
-
-            handler(event);
-        });
-
+            },
+        )?;
         let mut device = Device {
             state_topic,
-            client: EspMqttClient::new(
-                format!("mqtt{}://{BROKER_HOST}", if self.secure { "s" } else { "" }),
-                &config,
-                callback,
-            )?,
             config,
+            client,
         };
+
         device.subscribe(command_topic)?;
 
         Ok(device)

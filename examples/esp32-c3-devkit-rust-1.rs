@@ -1,31 +1,38 @@
-#![warn(clippy::all, clippy::nursery, clippy::pedantic, rust_2018_idioms)]
-#![forbid(unsafe_code)]
-
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
 
 use anyhow::Result;
-use embedded_svc::mqtt::client::{Details, Event, MessageId, QoS};
+use embedded_svc::mqtt::client::{Details, Event, QoS};
 use esp_idf_hal::delay::Ets;
 use esp_idf_hal::i2c::{config::Config as I2cConfig, I2cDriver};
 use esp_idf_hal::prelude::Peripherals;
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use esp_idf_svc::log::EspLogger;
 use esp_idf_svc::nvs::EspDefaultNvsPartition;
-use losant_mqtt_esp_idf::{json, Device, EventResult};
+use losant_mqtt_esp_idf::prelude::*;
 
 mod util;
 
 use util::led::{Ws2812Rmt, RGB8};
 use util::wifi;
 
-// enum to describe possible Losant commands
+// adjacently tagged enum to describe possible Losant commands
 #[derive(serde::Deserialize)]
-#[serde(tag = "name", rename_all = "camelCase")]
+#[serde(tag = "name", content = "payload", rename_all = "camelCase")]
 enum Command {
-    // this would be a command with "name": "setLed" (if rename_all = "camelCase")
-    SetLed { r: u8, g: u8, b: u8 },
+    // e.g. { "name": "setLed", "payload": { "ledR": 0, "ledG": 0, "ledB": 0 }}
+    SetLed(LedColor),
+}
+
+// e.g. { "data": { "ledR": 0, "ledG": 0, "ledB": 0 }}
+type LedState = State<LedColor>;
+#[derive(Default, Copy, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LedColor {
+    led_r: u8,
+    led_g: u8,
+    led_b: u8,
 }
 
 fn main() -> Result<()> {
@@ -50,6 +57,16 @@ fn main() -> Result<()> {
     shtc3.reset(&mut Ets).unwrap();
     let shtc3_id = &format!("{:#02X}", shtc3.device_identifier().unwrap());
 
+    // a state object to hold the led color
+    let led_state = Arc::new(RwLock::new(LedState {
+        data: LedColor {
+            led_r: 0,
+            led_g: 0,
+            led_b: 0,
+        },
+        ..LedState::default()
+    }));
+
     // create a new Device
     //
     // the device will connect to the Losant broker and subscribe to commands
@@ -59,52 +76,59 @@ fn main() -> Result<()> {
     //
     // defaults to using TLS, but you can disable it with secure(false)
     let mut device = Device::builder()
-        .handler(|event: &EventResult<'_>| match event {
-            Ok(Event::Received(msg)) => {
-                if *msg.details() == Details::Complete {
-                    println!("MQTT message: {msg:?}");
+        // sets the handler for all MQTT events except Losant commands, which
+        // are intercepted by command_handler().
+        .handler({
+            |event: &EventResult| match event {
+                Ok(Event::Received(msg)) => {
+                    if *msg.details() == Details::Complete {
+                        println!("MQTT message: {msg:?}");
+                    }
                 }
+                Ok(event) => println!("MQTT event: {event:?}"),
+                Err(e) => eprintln!("MQTT error: {e}"),
             }
-            Ok(event) => println!("MQTT event: {event:?}"),
-            Err(e) => eprintln!("MQTT error: {e}"),
         })
         .command_handler({
-            // led is wrapped in an Arc<Mutex<_>> so it can be moved into the
-            // closure and mutated
-            let led_ptr = led.clone();
+            let led = Arc::clone(&led);
+            let led_state = Arc::clone(&led_state);
 
             move |command: &Command| match *command {
-                Command::SetLed { r, g, b } => {
-                    let mut guard = led_ptr.lock().unwrap();
-                    guard.set(RGB8::new(r, g, b)).unwrap();
+                Command::SetLed(LedColor {
+                    led_r: r,
+                    led_g: g,
+                    led_b: b,
+                }) => {
+                    if led.lock().unwrap().set(RGB8::new(r, g, b)).is_ok() {
+                        led_state.write().unwrap().data = LedColor {
+                            led_r: r,
+                            led_g: g,
+                            led_b: b,
+                        };
+                    }
                 }
             }
         })
         .build()?;
-
-    // send temperature and humidity values from the SHTC3 sensor
-    let mut publish_shtc3_state = |temperature: f32, humidity: f32| -> Result<MessageId> {
-        Ok(device.send_state_json(
-            QoS::AtLeastOnce,
-            false,
-            json!({
-                "data": {
-                    "temperature": temperature,
-                    "humidity": humidity,
-                },
-                "meta": {
-                    "sensorDeviceIdentifier": shtc3_id,
-                }
-            }),
-        )?)
-    };
 
     // main loop
     loop {
         if let Ok(measurement) = shtc3.measure(shtcx::PowerMode::NormalMode, &mut Ets) {
             let temperature = measurement.temperature.as_degrees_celsius();
             let humidity = measurement.humidity.as_percent();
-            publish_shtc3_state(temperature, humidity)?;
+            device.send_state_json(
+                QoS::AtLeastOnce,
+                false,
+                json!({
+                    "data": {
+                        "temperature": temperature,
+                        "humidity": humidity,
+                    },
+                    "meta": {
+                        "sensorDeviceIdentifier": shtc3_id,
+                    }
+                }),
+            )?;
         }
 
         thread::sleep(Duration::from_secs(60));

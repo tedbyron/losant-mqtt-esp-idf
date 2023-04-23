@@ -1,6 +1,12 @@
-#![warn(clippy::all, clippy::cargo, clippy::nursery, clippy::pedantic, rust_2018_idioms)]
+#![warn(
+    clippy::all,
+    clippy::cargo,
+    clippy::nursery,
+    clippy::pedantic,
+    rust_2018_idioms
+)]
 #![forbid(unsafe_code)]
-#![feature(trait_alias)]
+#![feature(trait_alias, let_chains)]
 #![doc = include_str!("../README.md")]
 
 use std::marker::PhantomData;

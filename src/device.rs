@@ -20,7 +20,7 @@ const ROOT_CA_CERT: X509<'_> =
 pub trait MqttEventHandler =
     for<'b> FnMut(&'b std::result::Result<Event<EspMqttMessage<'b>>, EspError>) + Send + 'static;
 pub trait ConfigUpdater = FnOnce(&mut MqttClientConfiguration<'_>) + 'static;
-pub trait CommandHandler = FnMut(&'static str) + 'static;
+pub trait CommandHandler<Payload = ()> = FnMut(&str, Payload) + Send + 'static;
 
 /// Create Losant state and command topic forms using the specified `id`.
 #[inline]
@@ -40,7 +40,13 @@ impl<'a> Device<'a> {
     #[inline]
     #[must_use]
     pub fn builder() -> Builder<'a> {
-        Builder { id: None, secure: true, handler: None, config: None }
+        Builder {
+            id: None,
+            secure: true,
+            handler: None,
+            command_handler: None,
+            config: None,
+        }
     }
 
     /// Constructs a new `Device` with the provided event `handler`, using
@@ -72,7 +78,9 @@ impl<'a> Device<'a> {
     ) -> Result<MessageId> {
         let payload = payload.as_ref();
         Self::check_publish(qos, payload)?;
-        self.client.publish(topic.as_ref(), qos, retain, payload).map_err(Error::from)
+        self.client
+            .publish(topic.as_ref(), qos, retain, payload)
+            .map_err(Error::from)
     }
 
     /// Enqueue a message to be sent later (non-blocking `publish`).
@@ -91,7 +99,9 @@ impl<'a> Device<'a> {
     ) -> Result<MessageId> {
         let payload = payload.as_ref();
         Self::check_publish(qos, payload)?;
-        self.client.enqueue(topic.as_ref(), qos, retain, payload).map_err(Error::from)
+        self.client
+            .enqueue(topic.as_ref(), qos, retain, payload)
+            .map_err(Error::from)
     }
 
     /// Publish device state to the broker. `QoS::AtMostOnce` (0) or
@@ -106,22 +116,21 @@ impl<'a> Device<'a> {
     /// - if there was an error publishing the payload
     ///
     /// See <https://docs.losant.com/mqtt/overview/#publishing-device-state>
-    pub fn publish_state<Data, Time, FlowVersion, Meta>(
+    pub fn publish_state<Data>(
         &mut self,
         qos: QoS,
         retain: bool,
-        state: &State<'_, Data, Time, FlowVersion, Meta>,
+        state: &State<'_, Data>,
     ) -> Result<MessageId>
     where
         Data: serde::Serialize,
-        Time: serde::Serialize,
-        FlowVersion: serde::Serialize,
-        Meta: serde::Serialize,
     {
         let payload = serde_json::to_string(&state).map_err(Error::from)?;
         let payload = payload.as_bytes();
         Self::check_publish(qos, payload)?;
-        self.client.publish(&self.state_topic_form, qos, retain, payload).map_err(Error::from)
+        self.client
+            .publish(&self.state_topic_form, qos, retain, payload)
+            .map_err(Error::from)
     }
 
     /// Publish device state to the broker. `QoS::AtMostOnce` (0) or
@@ -146,7 +155,9 @@ impl<'a> Device<'a> {
         let payload = state.to_string();
         let payload = payload.as_bytes();
         Self::check_publish(qos, payload)?;
-        self.client.publish(&self.state_topic_form, qos, retain, payload).map_err(Error::from)
+        self.client
+            .publish(&self.state_topic_form, qos, retain, payload)
+            .map_err(Error::from)
     }
 
     /// Subscribe to the `topic`. `QoS::AtMostOnce` (0) is used.
@@ -155,7 +166,9 @@ impl<'a> Device<'a> {
     ///
     /// - if there was an error subscribing to the topic
     pub fn subscribe(&mut self, topic: impl AsRef<str>) -> Result<MessageId> {
-        self.client.subscribe(topic.as_ref(), QoS::AtMostOnce).map_err(Error::from)
+        self.client
+            .subscribe(topic.as_ref(), QoS::AtMostOnce)
+            .map_err(Error::from)
     }
 
     /// Unsubscribe from the `topic`.
@@ -189,6 +202,7 @@ pub struct Builder<'a> {
     id: Option<&'a str>,
     secure: bool,
     handler: Option<Box<dyn MqttEventHandler>>,
+    command_handler: Option<&'a dyn CommandHandler>,
     config: Option<Box<dyn ConfigUpdater>>,
 }
 
@@ -211,10 +225,17 @@ impl<'a> Builder<'a> {
         self
     }
 
-    /// Sets the handler for MQTT events.
+    /// Sets the handler for all MQTT events.
     #[must_use]
     pub fn handler(mut self, handler: impl MqttEventHandler) -> Self {
         self.handler = Some(Box::new(handler));
+        self
+    }
+
+    /// Sets the handler for all Losant broker command messages.
+    #[must_use]
+    pub fn command_handler(mut self, handler: &'a impl CommandHandler) -> Self {
+        self.command_handler = Some(handler);
         self
     }
 
@@ -259,17 +280,23 @@ impl<'a> Builder<'a> {
 
         let (state_topic_form, command_topic_form) =
             topic_forms(config.client_id.ok_or(Error::MissingId)?);
+        let handler = self.handler.unwrap_or_else(|| Box::new(|_| ()));
+        let callback: Box<
+            dyn for<'b> FnMut(&'b std::result::Result<Event<EspMqttMessage<'b>>, EspError>)
+                + Send
+                + 'static,
+        > = Box::new(|event| {
+            if let Ok(Event::Received(msg)) = event && msg.topic() == Some(&command_topic_form.clone()){
+            } else {
+            }
+        });
 
         let mut device = Device {
             state_topic_form,
             client: EspMqttClient::new(
-                if self.secure {
-                    format!("mqtts://{BROKER_HOST}")
-                } else {
-                    format!("mqtt://{BROKER_HOST}")
-                },
+                format!("mqtt{}://{BROKER_HOST}", if self.secure { "s" } else { "" }),
                 &config,
-                self.handler.unwrap_or_else(|| Box::new(|_| ())),
+                callback,
             )?,
             config,
         };

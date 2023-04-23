@@ -9,9 +9,6 @@
 #![feature(trait_alias)]
 #![doc = include_str!("../README.md")]
 
-use std::marker::PhantomData;
-use std::time::Duration;
-
 use esp_idf_sys::EspError;
 pub use serde_json::json;
 
@@ -46,21 +43,3 @@ pub enum Error {
     PayloadSize,
 }
 pub type Result<T> = std::result::Result<T, Error>;
-
-/// A serializable Losant `state` topic message. For the `time` field, see
-/// `esp_idf_svc::systime::EspSystemTime::now()`.
-///
-/// See <https://docs.losant.com/mqtt/overview/#publishing-device-state>
-#[derive(Debug, Clone, PartialEq, Eq, ::serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct State<'a, Data, Time = Duration, FlowVersion = &'a str, Meta = ()> {
-    pub data: Data,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub time: Option<Time>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub flow_version: Option<FlowVersion>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub meta: Option<Meta>,
-
-    phantom: PhantomData<&'a ()>,
-}

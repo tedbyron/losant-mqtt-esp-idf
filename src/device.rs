@@ -7,7 +7,7 @@ use esp_idf_svc::mqtt::client::{
 use esp_idf_svc::tls::X509;
 use esp_idf_sys::EspError;
 
-use crate::{Error, Result, State};
+use crate::{Error, Result};
 
 const BROKER_HOST: &str = "broker.losant.com";
 /// See <https://docs.losant.com/mqtt/overview/#message-limits>
@@ -22,15 +22,9 @@ pub trait EventResultHandler = for<'b> FnMut(&'b EventResult<'b>) + Send + 'stat
 pub trait ConfigUpdater = FnOnce(&mut MqttClientConfiguration<'_>) + 'static;
 pub trait CommandHandler<Command> = for<'b> FnMut(&'b Command) + Send + 'static;
 
-/// Create Losant state and command topic forms using the specified `id`.
-#[inline]
-fn topic_forms(id: &str) -> (String, String) {
-    (format!("losant/{id}/state"), format!("losant/{id}/command"))
-}
-
 // TODO: docs
 pub struct Device<'a> {
-    state_topic_form: String,
+    state_topic: String,
     pub config: MqttClientConfiguration<'a>,
     client: EspMqttClient,
 }
@@ -47,18 +41,6 @@ impl<'a> Device<'a> {
             command_handler: None,
             config: None,
         }
-    }
-
-    /// Constructs a new `Device` with the provided event `handler`, using
-    /// default values for other `Device` options.
-    ///
-    /// # Errors
-    ///
-    /// - if a device ID was not provided in cfg.toml
-    /// - if the MQTT client could not be constructed
-    /// - if the client failed to subscribe to the Losant `command` topic
-    pub fn with_handler(handler: impl EventResultHandler) -> Result<Self> {
-        Self::builder::<()>().handler(handler).build()
     }
 
     /// Publish a message to the broker. `QoS::AtMostOnce` (0) or
@@ -83,7 +65,7 @@ impl<'a> Device<'a> {
             .map_err(Error::from)
     }
 
-    /// Enqueue a message to be sent later (non-blocking `publish`).
+    /// Enqueue a message to be sent later (non-blocking `publish()`).
     ///
     /// # Errors
     ///
@@ -116,20 +98,15 @@ impl<'a> Device<'a> {
     /// - if there was an error publishing the payload
     ///
     /// See <https://docs.losant.com/mqtt/overview/#publishing-device-state>
-    pub fn send_state<Data>(
-        &mut self,
-        qos: QoS,
-        retain: bool,
-        state: &State<'_, Data>,
-    ) -> Result<MessageId>
+    pub fn send_state<S>(&mut self, qos: QoS, retain: bool, state: &S) -> Result<MessageId>
     where
-        Data: serde::Serialize,
+        S: serde::Serialize,
     {
         let payload = serde_json::to_string(&state).map_err(Error::from)?;
         let payload = payload.as_bytes();
         Self::check_publish(qos, payload)?;
         self.client
-            .publish(&self.state_topic_form, qos, retain, payload)
+            .publish(&self.state_topic, qos, retain, payload)
             .map_err(Error::from)
     }
 
@@ -156,7 +133,7 @@ impl<'a> Device<'a> {
         let payload = payload.as_bytes();
         Self::check_publish(qos, payload)?;
         self.client
-            .publish(&self.state_topic_form, qos, retain, payload)
+            .publish(&self.state_topic, qos, retain, payload)
             .map_err(Error::from)
     }
 
@@ -262,7 +239,7 @@ where
         let mut config = MqttClientConfiguration {
             // https://docs.losant.com/mqtt/overview/#mqtt-version-and-limitations
             protocol_version: Some(MqttProtocolVersion::V3_1_1),
-            // keepalive timeout: https://docs.losant.com/devices/overview/#connection-log
+            // https://docs.losant.com/devices/overview/#connection-log
             keep_alive_interval: Some(Duration::from_secs(90)),
             username: Some(crate::CONFIG.losant_key),
             password: Some(crate::CONFIG.losant_secret),
@@ -274,23 +251,20 @@ where
             config_fn(&mut config);
         }
 
-        // client_id can be set from cfg.toml, id(), or config(); prefer id() if called
         if self.id.is_some() {
             config.client_id = self.id;
         } else if !crate::CONFIG.losant_device_id.is_empty() {
             config.client_id = Some(crate::CONFIG.losant_device_id);
         }
 
-        let (state_topic_form, command_topic_form) =
-            topic_forms(config.client_id.ok_or(Error::MissingId)?);
-        let command_topic = command_topic_form.clone();
+        let (state_topic, command_topic) = Self::topics(config.client_id.ok_or(Error::MissingId)?);
+        let command_topic_clone = command_topic.clone();
         let mut handler = self.handler.unwrap_or_else(|| Box::new(|_| {}));
         let mut command_handler = self.command_handler.unwrap_or_else(|| Box::new(|_| {}));
         let callback = Box::new(move |event: &EventResult<'_>| {
-            // handle commands if they match the command topic and data can be parsed as Payload
             if let Ok(Event::Received(msg)) = event {
                 if let Some(topic) = msg.topic() {
-                    if topic == command_topic.as_str() {
+                    if topic == command_topic_clone.as_str() {
                         if let Ok(command) = serde_json::from_slice::<Command>(msg.data()) {
                             command_handler(&command);
                         }
@@ -304,7 +278,7 @@ where
         });
 
         let mut device = Device {
-            state_topic_form,
+            state_topic,
             client: EspMqttClient::new(
                 format!("mqtt{}://{BROKER_HOST}", if self.secure { "s" } else { "" }),
                 &config,
@@ -312,8 +286,14 @@ where
             )?,
             config,
         };
-        device.subscribe(command_topic_form)?;
+        device.subscribe(command_topic)?;
 
         Ok(device)
+    }
+
+    /// Create Losant state and command topic forms using the specified `id`.
+    #[inline]
+    fn topics(id: &str) -> (String, String) {
+        (format!("losant/{id}/state"), format!("losant/{id}/command"))
     }
 }
